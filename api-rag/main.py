@@ -5,6 +5,7 @@ import ollama
 import chromadb
 from chromadb.utils import embedding_functions
 import os
+import logging
 
 app = FastAPI()
 
@@ -17,6 +18,9 @@ collection = chroma_client.get_or_create_collection(name="rag-collection")
 # 🔧 Configuração dos modelos
 EMBEDDING_MODEL = "nomic-embed-text"
 LLM_MODEL = "gemma:2b"  # ✅ Modelo mais leve para CPU
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("api-rag")
 
 
 # 📦 Modelo de entrada para /index
@@ -33,7 +37,7 @@ class QueryItem(BaseModel):
 
 
 # 🚀 Rota para indexar documentos
-@app.post("/index")
+@app.post("/embeddings")
 def index_documents(item: IndexItem):
     try:
         embeddings = []
@@ -59,32 +63,42 @@ def index_documents(item: IndexItem):
 @app.post("/query")
 def query_rag(item: QueryItem):
     try:
+        logger.info(f"[API-RAG] Recebido /query: {item}")
         # 🔹 Gera embedding da pergunta
         query_embedding = ollama.embeddings(model=EMBEDDING_MODEL, prompt=item.query)[
             "embedding"
         ]
-
+        logger.debug(f"[API-RAG] Embedding gerado: {query_embedding[:5]}... (tamanho={len(query_embedding)})")
         # 🔍 Busca nos vetores
         results = collection.query(
             query_embeddings=[query_embedding], n_results=item.n_results
         )
-
-        documents = results["documents"][0] if results["documents"] else []
+        logger.info(f"[API-RAG] Resultados da busca: {results}")
+        documents = []
+        if results["documents"]:
+            # Junta todos os documentos relevantes encontrados
+            for doclist in results["documents"]:
+                documents.extend(doclist)
         context = "\n".join(documents)
-
+        logger.debug(f"[API-RAG] Contexto encontrado: {context}")
         if not context:
-            return {"answer": "Nenhum documento relevante encontrado."}
-
+            logger.warning("[API-RAG] Nenhum documento relevante encontrado.")
+            return {"answer": "Nenhum documento relevante encontrado.", "documents": []}
         # 🧠 Gera a resposta com o modelo LLM
-        prompt = f"""Use os seguintes documentos para responder a pergunta:\n{context}\n\nPergunta: {item.query}\nResposta:"""
-
-        response = ollama.generate(model=LLM_MODEL, prompt=prompt)
-
-        answer = response["response"]
-
+        prompt = f"""DOCUMENTOS RELEVANTES:\n{context}\n\nPergunta: {item.query}\nResposta:"""
+        logger.debug(f"[API-RAG] Prompt para LLM: {prompt}")
+        try:
+            response = ollama.generate(model=LLM_MODEL, prompt=prompt)
+            logger.info(f"[API-RAG] Resposta do modelo: {response}")
+            answer = response["response"]
+        except Exception as ollama_error:
+            logger.error(f"[API-RAG] Erro ao chamar ollama.generate: {ollama_error}")
+            answer = "O modelo não conseguiu gerar uma resposta para a pergunta."
         return {"answer": answer, "documents": documents}
-
     except Exception as e:
+        import traceback
+        logger.error(f"[API-RAG] Erro inesperado: {e}")
+        logger.debug(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Erro na consulta: {str(e)}")
 
 
