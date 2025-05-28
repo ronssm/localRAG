@@ -42,20 +42,24 @@ services:
     build: ./proxy
     container_name: proxy
     ports:
-      - "5050:5000"
+      - "5050:5050"
     depends_on:
       - api-rag
     networks:
       - rag-network
-    restart: always
+    restart: unless-stopped
 
-  openwebui:
-    image: ghcr.io/open-webui/open-webui:main
-    container_name: openwebui
+  frontend:
+    build:
+      context: ./frontend
+    container_name: frontend
+    volumes:
+      - ./frontend:/app
     ports:
-      - "3000:8080"
+      - "3000:3000"
+    command: npm run dev
     environment:
-      - BASE_URL=http://proxy:5000
+      - NODE_ENV=development
     depends_on:
       - proxy
     networks:
