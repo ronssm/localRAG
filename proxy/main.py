@@ -25,8 +25,9 @@ class GenerateRequest(BaseModel):
 
 
 class EmbeddingRequest(BaseModel):
-    model: str
-    prompt: str
+    ids: list[str]
+    documents: list[str]
+    metadatas: list[dict]
 
 
 class ChatMessage(BaseModel):
@@ -121,7 +122,12 @@ async def embeddings(request: EmbeddingRequest):
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                f"{RAG_API_URL}/embeddings", json={"prompt": request.prompt}
+                f"{RAG_API_URL}/embeddings",
+                json={
+                    "ids": request.ids,
+                    "documents": request.documents,
+                    "metadatas": request.metadatas
+                }
             )
             if resp.status_code != 200:
                 raise HTTPException(status_code=resp.status_code, detail=resp.text)
